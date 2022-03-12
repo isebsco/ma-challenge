@@ -28,5 +28,6 @@ urlpatterns = router.urls
 
 urlpatterns += [
     path('admin/', admin.site.urls),
+    path('updatepc/<str:lat>/<str:lon>', PostCodesUpdateView.as_view()),
     
 ]
