@@ -2,7 +2,7 @@ import csv
 
 from django.core.files.base    import ContentFile
 from django.core.files.storage import FileSystemStorage
-from rest_framework            import viewsets, generics
+from rest_framework            import viewsets, generics, status, views
 from rest_framework.decorators import action
 from rest_framework.response   import Response
 
@@ -56,3 +56,19 @@ class PostCodesListAll (generics.ListAPIView):
     def get_queryset(self):
         querySet = PostCode.objects.all()
         return querySet
+
+class PostCodesUpdateView(generics.ListAPIView):
+    """
+    A view that updates the jsonField taking into account the data received
+    """
+    serializer_class = PostCodeSerializer    
+    def get(self,request,*args,**kwargs):
+        data1 = request.data
+        querySet = PostCode.objects.filter(lat=self.kwargs['lat']).filter(lon=self.kwargs['lon'])
+        post_code = PostCode.objects.get(lat=self.kwargs['lat'], lon=self.kwargs['lon'])
+        if querySet.exists():
+            post_code.data = data1
+            post_code.save()
+            return Response("PostCode Info Updated",status=status.HTTP_200_OK)
+        else:
+            return Response("Post Code doesn't exist",status=status.HTTP_404_NOT_FOUND)
