@@ -20,6 +20,6 @@ class ConsumePostCodesApiView(generics.ListAPIView):
         response = requests.get(url_ms1)
         #convert reponse data into json
         print(url_ms1)
-        print(response.json())
-        return Response("PostCode info received",status=status.HTTP_200_OK)
+        print(response.json()[0])
+        return Response("Pos tCode info received",status=status.HTTP_200_OK)
         
