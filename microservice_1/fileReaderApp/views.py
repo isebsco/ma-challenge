@@ -25,7 +25,13 @@ class PostCodeViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['POST'])
     def upload_file(self, request):
         """
-        Method to upload data from CSV
+        Method to upload data from CSV, it will receive the file, store it in the temp folder.
+        
+        Then this method will open the document within a generator to start reading row by row,
+        after that it will create in bulk the postcodes elements in the DB.
+        
+        Finally, it will bulk_update the created elements consuming the 2 microservices which connects
+        with the external API.
         """
         file = request.FILES["file"]
 
@@ -57,15 +63,24 @@ class PostCodeViewSet(viewsets.ModelViewSet):
                 errors_counter += 1
             else:
                 (lat, lon) = row
-                response = requests.get(url_ms2 + lat + "/" + lon)
-                if response.json()['result'] is not None:
-                    received_data=response.json()['result'][0]
-                else:
-                    received_data={"without data"}
-                    coords_without_data+=1
-                post_codes_list.append(PostCode(lat=lat, lon=lon, data=received_data))
+                post_codes_list.append(PostCode(lat=lat, lon=lon))
 
         PostCode.objects.bulk_create(post_codes_list)
+        
+        saved_post_codes=list(PostCode.objects.all())        
+        for postcode in saved_post_codes:
+            lat1=postcode.lat
+            lon1=postcode.lon
+            response = requests.get(url_ms2 + lat1 + "/" + lon1)            
+            if response.json()['result'] is not None:
+                postcode.data=response.json()['result'][0]
+            else:
+                postcode.data={"without data"}
+                coords_without_data+=1
+            
+
+        PostCode.objects.bulk_update(saved_post_codes,['data'] )
+
 
         return Response("Successfully upload the data. " + str(total_coords) + " rows processed, " + str(errors_counter) + " rows with errors in the csv file and " + str(coords_without_data) + " coords without related data")
 
