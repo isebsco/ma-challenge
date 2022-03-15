@@ -1,5 +1,8 @@
 import csv
 import requests
+import aiohttp
+import asyncio
+import time
 
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage
@@ -16,7 +19,7 @@ fs = FileSystemStorage(location='tmp/')
 
 class PostCodeViewSet(viewsets.ModelViewSet):
     """
-    A ViewSet for viewing and editing PostCode.
+    A ViewSet for saving and updating PostCode.
     """
     queryset = PostCode.objects.all()
     serializer_class = PostCodeSerializer
@@ -33,8 +36,8 @@ class PostCodeViewSet(viewsets.ModelViewSet):
         Finally, it will bulk_update the created elements consuming the 2 microservices which connects
         with the external API.
         """
+        start1 = time.time()
         file = request.FILES["file"]
-
         content = file.read()
         file_content = ContentFile(content)
         file_name = fs.save("_tmp.csv", file_content)
@@ -44,19 +47,14 @@ class PostCodeViewSet(viewsets.ModelViewSet):
             with open(file_name, 'r') as csv_file:
                 reader = csv.reader(csv_file, dialect, **fmtparams)
                 if skip_first_line:
-                    next(reader, None)
+                    next(reader, None)#avoid first row
                 for row in reader:
                     yield row
 
-        #csv_file = open(tmp_file, errors="ignore")
-        #reader = csv.reader(csv_file)
-        #next(reader)#avoid first row
-
         post_codes_list = []#List to the bulk create
         errors_counter = 0 #flag to count errors in the csv file
-        coords_without_data=0
         total_coords=0
-        url_ms2= "http://127.0.0.1:7000/consumeapi/"
+        
         for row in rows_generator(tmp_file, skip_first_line=True):
             total_coords+=1
             if len(row)!=2 or row[0]=='0' or row[1]=='0':
@@ -67,22 +65,40 @@ class PostCodeViewSet(viewsets.ModelViewSet):
 
         PostCode.objects.bulk_create(post_codes_list)
         
-        saved_post_codes=list(PostCode.objects.all())        
-        for postcode in saved_post_codes:
-            lat1=postcode.lat
-            lon1=postcode.lon
-            response = requests.get(url_ms2 + lat1 + "/" + lon1)            
-            if response.json()['result'] is not None:
-                postcode.data=response.json()['result'][0]
-            else:
-                postcode.data={"without data"}
-                coords_without_data+=1
-            
+        list_size=len(post_codes_list)
+        end1 = time.time()
+        print("reading the file and saving data postcodes takes "+ str(end1-start1))
+        start2 = time.time()
+        saved_post_codes=(list(PostCode.objects.all().order_by('-id')))[:list_size]
+        print("loading postcodes takes "+ str(time.time()-start2))
+        start3 = time.time()
+        async def main():
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                for postcode in saved_post_codes:
+                    task = asyncio.ensure_future(get_postcode_data(session, postcode))
+                    tasks.append(task)
+                counter = await asyncio.gather(*tasks)
+                
+        async def get_postcode_data(session, pc):
+            lat1=pc.lat
+            lon1=pc.lon            
+            url = f'http://127.0.0.1:7000/consumeapi/{lat1}/{lon1}'
 
+            async with session.get(url) as response:
+                result_data = await response.json()
+                if result_data['result'] is not None:
+                    pc.data=result_data['result'][0]
+                else:
+                    pc.data={"without data"}
+
+        asyncio.run(main()) 
+                  
         PostCode.objects.bulk_update(saved_post_codes,['data'] )
+        print("Time consumin exteral API "+ str(time.time()-start3))
 
+        return Response("Successfully upload the data. " + str(total_coords) + " rows processed, " + str(errors_counter) + " rows with errors in the csv file")
 
-        return Response("Successfully upload the data. " + str(total_coords) + " rows processed, " + str(errors_counter) + " rows with errors in the csv file and " + str(coords_without_data) + " coords without related data")
 
 class PostCodesUpdateView(generics.ListAPIView):
     """
